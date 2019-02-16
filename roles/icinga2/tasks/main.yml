@@ -1,0 +1,105 @@
+---
+
+- name: DB PASSWORD | Estableciendo la contraseña de root en la instalación del paquete
+  debconf: 
+    name: mysql-server
+    question: 'mysql-server/root_password'
+    value: '{{ db_root_password }}' 
+    vtype: 'password'
+  become: true
+
+- name: DB CONFIRM PASSWORD | Estableciendo la contraseña de root en la instalación del paquete
+  debconf: 
+    name: 'mysql-server'
+    question: 'mysql-server/root_password_again'
+    value: '{{ db_root_password }}'
+    vtype: 'password'
+
+- name: DB PACKAGES | Instalando los paquetes de MYSQL
+  apt: 
+    name: 
+      - mysql-client
+      - mysql-common
+      - mysql-server-5.7
+      - python3-mysqldb
+    state: latest
+
+- name: DB DAEMON | Iniciando el servicio de Mysql
+  systemd:
+    name: mysql
+    state: started
+    enabled: true
+
+- name: ICINGA2 REPO KEY | Importando la clave pública del repositorio
+  apt_key:
+    url: https://packages.icinga.com/icinga.key
+    state: present
+
+- name: ICINGA2 REPO | Añadiendo el repositorio de Icinga2
+  apt_repository:
+    repo: deb https://packages.icinga.com/ubuntu icinga-bionic main
+    state: present
+    filename: icinga2
+    validate_certs: yes
+    update_cache: yes
+
+- name: ICINGA2 MYSQL | Estableciendo la DB para el paquete de 'icinga-ido-mysql'
+  debconf:
+    name: "icinga2-ido-mysql"
+    question: "icinga2-ido-mysql/db/dbname"
+    value: "{{ db_icinga2 }}"
+    vtype: "string"
+
+- name: ICINGA2 MYSQL | Estableciendo el usuario de la DB para el paquete de 'icinga-ido-mysql'
+  debconf:
+    name: "icinga2-ido-mysql"
+    question: "icinga2-ido-mysql/db/app-user"
+    value: "{{ db_icinga2_user }}"
+    vtype: "string"
+
+- name: ICINGA2 MYSQL | Estableciendo la contraseña para el usuario de la DB para el paquete de 'icinga-ido-mysql'
+  debconf:
+    name: "icinga2-ido-mysql"
+    question: "icinga2-ido-mysql/mysql/app-pass"
+    value: "{{ db_icinga2_password }}"
+    vtype: "password"
+
+- name: PACKAGES | Instalando los paquetes de Icinga2
+  apt:
+    name:
+      - icinga2
+      - vim-icinga2
+      - vim-addon-manager
+      - icinga2-ido-mysql
+      - monitoring-plugins-basic
+    state: latest
+
+- name: ICINGA2 DAEMON | Iniciando y habilitando el servico
+  systemd:
+    name: icinga2
+    state: started
+    enabled: true
+
+- name: ICINGA2 VIM | Configurando el editor de texto vim
+  command: vim-addon-manager -w install icinga2
+
+- name: ICINGA2 API SETUP | Generando el usuario de la api para transportar los comandos a los nodos cliente
+  command: icinga2 api setup
+
+- name: ICINGA2 API FILE | Copiando las credenciales de la api
+  template:
+    src: api_config.j2
+    dest: /etc/icinga2/features-available/api.conf
+    mode: 0640
+    owner: root
+    group: root
+
+- name: ICINGA2 MODULES | Habilitando los módulos de Icinga2
+  icinga2_feature:
+    name: "{{ item }}" 
+    state: present
+  with_items:
+    - command
+    - ido-mysql
+    - api
+  notify: icinga2 restart
