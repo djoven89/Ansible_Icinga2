@@ -1,0 +1,50 @@
+---
+
+- name: HOSTNAME | Estableciendo el nombre del servidor
+  hostname:
+    name: "{{ server_fqdn }}"
+  ignore_errors: true
+
+- name: TIMEZONE | Estableciendo la zona horaria del servidor
+  timezone:
+    name: Europe/Madrid
+  notify: cron restart
+  ignore_errors: true
+
+- name: UPDATE | Actualizando el sistema
+  apt:
+    upgrade: dist
+
+- name: PACKAGES | Instalando paquetes para la gestión del servidor
+  apt:
+    name:
+      - vim
+      - htop
+      - dnsutils
+      - tree
+      - mtr
+      - curl
+      - wget
+      - colordiff
+      - unzip
+
+- name: VIM | Añadiendo la configuración de vim
+  copy:
+    src: vim_config
+    dest: /root/.vimrc
+    owner: root
+    group: root
+    mode: 0600
+
+- name: SHELL | Añadiendo color al prompt
+  lineinfile:
+    path: /root/.bashrc
+    line: 'export PS1="\[\033[38;5;1m\]\u\[$(tput sgr0)\]\[\033[38;5;6m\]@\[$(tput sgr0)\]\[\033[38;5;1m\]\h\[$(tput sgr0)\]\[\033[38;5;6m\]:\[$(tput sgr0)\]\[\033[38;5;3m\]\w\[$(tput sgr0)\]\[\033[38;5;15m\] \[$(tput sgr0)\]\[\033[38;5;6m\]\\$\[$(tput sgr0)\]\[\033[38;5;15m\] \[$(tput sgr0)\]"'
+
+- name: SHELL | Añadiendo opciones para el history
+  lineinfile:
+    path: /root/.bashrc
+    line: "{{ item }}"
+  with_items:
+    - HISTTIMEFORMAT="%F %T  "
+    - HISTCONTROL=ignorespace
