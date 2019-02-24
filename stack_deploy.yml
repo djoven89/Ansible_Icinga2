@@ -1,7 +1,10 @@
 ---
 
-- hosts: master
+- hosts: vm
 
   roles:
     - system
+    - icinga2
+    - icingaweb2
 
+...

@@ -13,7 +13,8 @@
 
 - name: UPDATE | Actualizando el sistema
   apt:
-    upgrade: dist
+    update_cache: yes
+    upgrade: yes
 
 - name: PACKAGES | Instalando paquetes para la gestión del servidor
   apt:

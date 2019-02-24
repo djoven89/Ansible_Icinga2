@@ -1,0 +1,193 @@
+---
+
+# 1 - Link simbólico
+# 2 - Null Client
+
+- name: ICINGA2 - REPO KEY | Obteniendo la clave pública del repositorio
+  apt_key:
+    url: https://packages.icinga.com/icinga.key
+    state: present
+
+- name: ICINGA2 - REPO | Añadiendo el repositorio
+  apt_repository:
+    repo: deb https://packages.icinga.com/ubuntu icinga-xenial main
+    state: present
+    filename: icinga2
+
+- name: ICINGA2 - MYSQL | Estableciendo los valores para el paquete de 'icinga-ido-mysql'
+  shell: |
+    echo "icinga2-ido-mysql icinga2-ido-mysql/db/dbname string {{ mysql_icinga_db }}" | debconf-set-selections
+    echo "icinga2-ido-mysql icinga2-ido-mysql/db/app-user string {{ mysql_icinga_user }}" | debconf-set-selections
+
+- name: ICINGA2 - PACKAGES | Instalando Icinga2 e Icingaweb2
+  apt:
+    name: 
+      - icinga2
+      - icingaweb2
+      - icingacli
+      - vim-icinga2
+      - vim-addon-manager
+      - icinga2-ido-mysql
+      - monitoring-plugins-basic
+
+- name: ICINGA2 - VIM | Configurando el editor de texto vim
+  command: vim-addon-manager -w install icinga2
+
+- name: MYSQL - USER | Creando el usuario para ambas bases de datos de Icinga2
+  mysql_user:
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
+    name: "{{ mysql_icinga_user }}"
+    password: "{{ mysql_icinga_password }}"
+    host: 'localhost'
+    priv: '{{ mysql_icinga_db }}.*:ALL'
+    state: present
+
+- name: MYSQL - ICINGAWEB2 | Creando la base de datos de IcingaWeb2
+  mysql_db:
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
+    name: "{{ mysql_icingaweb_db }}"
+    state: present
+
+- name: MYSQL - GRANT | Proporcionando privilegios a "{{ mysql_icinga_user }}" para Icingaweb2
+  mysql_user:
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
+    name: "{{ mysql_icinga_user }}"
+    host: 'localhost'
+    priv: '{{mysql_icingaweb_db }}.*:ALL'
+    state: present
+
+# fatal: [172.30.13.66]: FAILED! => {"changed": false, "msg": "mysql: [Warning] Using a password
+# on the command line interface can be insecure.\nERROR 1050 (42S01) at line 3: Table 'icingaweb_group' already exists\n"}
+
+- name: MYSQL - IMPORT | Importando las tablas para IcingaWeb2
+  mysql_db:
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
+    name: "{{ mysql_icingaweb_db }}"
+    state: import
+    target: /usr/share/icingaweb2/etc/schema/mysql.schema.sql
+
+- name: MYSQL - SQL | Copiando un 'insert' para el usuario admin de la GUI Icingaweb2
+  template:
+    src: admin_gui-sql.j2
+    dest: /tmp/admin_gui.sql
+    mode: 0640
+    owner: root
+    group: root
+
+# fatal: [172.30.13.66]: FAILED! => {"changed": false, "msg": "mysql: [Warning] Using a password
+# on the command line interface can be insecure.\nERROR 1062 (23000) at line 1: Duplicate entry 'dios' for key 'PRIMARY'\n"}
+
+- name: MYSQL - IMPORT | Importando la sentencia SQL a la base de datos de Icingaweb2
+  mysql_db:
+    login_user: root
+    login_password: "{{ mysql_root_password }}"
+    name: "{{ mysql_icingaweb_db }}"
+    state: import
+    target: /tmp/admin_gui.sql
+
+- name: ICINGAWEB2 - IDO | Estableciendo la contraseña correcta en el archivo de configuración
+  replace:
+    path: /etc/icinga2/features-available/ido-mysql.conf
+    regexp: 'password = .*'
+    replace: "password = \"{{ mysql_icinga_password }}\","    
+
+- name: ICINGA2 - MODULES | Habilitando los módulos de Icinga2
+  icinga2_feature:
+    name: "{{ item.value }}" 
+    state: present
+  with_items:
+    - { value: 'command' }
+    - { value: 'ido-mysql' }
+    - { value: 'api' }
+  notify: icinga2 restart
+
+- name: ICINGAWEB2 - VIRTUALHOST | Copiando el VirtualHost para Apache
+  command: icingacli setup config webserver apache --document-root /usr/share/icingaweb2/public > /etc/apache2/conf-available/icingaweb2.conf
+  notify: apache2 restart
+
+- name: ICINGAWEB2 - CONF DIR | Estableciendo la configuración de Icingaweb2
+  command: icingacli setup config directory
+
+- name: ICINGAWEB2 - MODULE DIR | Creando el directorio de los módulos
+  file:
+    path: "{{ item.dir }}"
+    state: directory
+    owner: www-data
+    group: icingaweb2
+  with_items:
+    - { dir: '/etc/icingaweb2/modules/' }
+    - { dir: '/etc/icingaweb2/enabledModules/' }
+    - { dir: '/etc/icingaweb2/modules/monitoring/' }
+    - { dir: '/etc/icingaweb2/enabledModules/monitoring/' }
+
+# 1 
+
+#- name: ICINGAWEB2 - GUI MODULE | Habilitando el módulo principal
+#  shell: |
+#    ln -s  /usr/share/icingaweb2/modules/monitoring /etc/icingaweb2/enabledModules/monitoring
+
+- name: ICINGAWEB2 - API | Generando el usuario para transportar los comandos a los nodos cliente
+  command: icinga2 api setup
+
+- name: ICINGAWEB2 - API FILE | Insertando el archivo con los datos correctos
+  template:
+    src: api_config.j2
+    dest: /etc/icinga2/features-available/api.conf
+    mode: 0640
+    owner: root
+    group: root
+
+- name: ICINGAWEB2 - SETUP | Añadiendo los archivos de configuración para evitar el wizard de configuración
+  template:
+    src: "{{ item.file }}"
+    dest: "{{ item.dest }}"
+    mode: 0660
+    owner: www-data
+    group: icingaweb2
+  with_items:
+    - { file: 'config.j2', dest: '/etc/icingaweb2/config.ini'}
+    - { file: 'resources.j2', dest: '/etc/icingaweb2/resources.ini'}
+    - { file: 'roles.j2', dest: '/etc/icingaweb2/roles.ini'}
+    - { file: 'authentication.j2', dest: '/etc/icingaweb2/authentication.ini'}
+    - { file: 'module_config.j2', dest: '/etc/icingaweb2/modules/monitoring/config.ini'}
+    - { file: 'module_backends.j2', dest: '/etc/icingaweb2/modules/monitoring/backends.ini'}
+    - { file: 'module_commandtransports.j2', dest: '/etc/icingaweb2/modules/monitoring/commandtransports.ini'}
+    - { file: 'groups.j2', dest: '/etc/icingaweb2/groups.ini'}
+  notify: icinga2 restart
+
+- name: ICINGA2 - DAEMON | Habilitando el servicio
+  systemd:
+    name: icinga2
+    state: started
+    enabled: yes
+
+- name: ICINGAWEB2 - URL
+  debug:
+    msg: "Configuración de Icinga2 e IcingaWeb2 terminada, puedes acceder a través de las siguientes direcciones IP: {{ ansible_all_ipv4_addresses}} a la URL: http://IP/icingaweb2"
+
+
+# 2
+
+- name: NULL CLIENT - Instalación
+  apt:
+    name: postfix
+
+- name: NULL CLIENT | Configuración
+  command: "{{ item.cmd }}"
+  with_items:
+    - { cmd: 'postconf -e	\"relayhost=[{{ mail_relay }}]\"' } 
+    - { cmd: 'postconf -e \"inet_interfaces=loopback-only\"' }
+    - { cmd: 'postconf -e \"mynetworks=127.0.0.1\"' }
+    - { cmd: 'postconf -e \"myorigin={{ dominio }}\"' }
+    - { cmd: 'postconf -e \"local_transport=error: local delivery disabled\"' }
+  notify: postfix restart
+
+- name: NULL CLIENT | Demonio
+  systemd:
+    name: postfix
+    status: started
+    enabled: yes

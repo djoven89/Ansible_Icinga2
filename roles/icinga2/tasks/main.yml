@@ -1,6 +1,6 @@
 ---
 
-- name: DB PASSWORD | Estableciendo la contraseña de root en la instalación del paquete
+- name: MYSQL | Estableciendo la contraseña de root en la instalación del paquete
   debconf: 
     name: mysql-server
     question: 'mysql-server/root_password'
@@ -8,34 +8,34 @@
     vtype: 'password'
   become: true
 
-- name: DB CONFIRM PASSWORD | Estableciendo la contraseña de root en la instalación del paquete
+- name: MYSQL | Confirmando la contraseña de root en la instalación del paquete
   debconf: 
     name: 'mysql-server'
     question: 'mysql-server/root_password_again'
     value: '{{ db_root_password }}'
     vtype: 'password'
 
-- name: DB PACKAGES | Instalando los paquetes de MYSQL
+- name: PACKAGES | Instalando los paquetes que requiere la base de datos
   apt: 
     name: 
-      - mysql-client
-      - mysql-common
-      - mysql-server-5.7
+      - mariadb-server
+      - mariadb-client
+      - mariadb-common
       - python3-mysqldb
     state: latest
 
-- name: DB DAEMON | Iniciando el servicio de Mysql
+- name: MYSQL | Iniciando y habilitando el servicio
   systemd:
     name: mysql
     state: started
     enabled: true
 
-- name: ICINGA2 REPO KEY | Importando la clave pública del repositorio
+- name: ICINGA2 | Importando la clave pública del repositorio de Icinga2
   apt_key:
     url: https://packages.icinga.com/icinga.key
     state: present
 
-- name: ICINGA2 REPO | Añadiendo el repositorio de Icinga2
+- name: ICINGA2 | Añadiendo el repositorio de Icinga2
   apt_repository:
     repo: deb https://packages.icinga.com/ubuntu icinga-bionic main
     state: present
@@ -43,28 +43,28 @@
     validate_certs: yes
     update_cache: yes
 
-- name: ICINGA2 MYSQL | Estableciendo la DB para el paquete de 'icinga-ido-mysql'
+- name: ICINGA2 | Estableciendo el nombre de la base de datos de Icinga2 en el paquete de 'icinga-ido-mysql'
   debconf:
     name: "icinga2-ido-mysql"
     question: "icinga2-ido-mysql/db/dbname"
     value: "{{ db_icinga2 }}"
     vtype: "string"
 
-- name: ICINGA2 MYSQL | Estableciendo el usuario de la DB para el paquete de 'icinga-ido-mysql'
+- name: ICINGA2 | Estableciendo el usuario de la base de datos de Icinga2 en el paquete de 'icinga-ido-mysql'
   debconf:
     name: "icinga2-ido-mysql"
     question: "icinga2-ido-mysql/db/app-user"
     value: "{{ db_icinga2_user }}"
     vtype: "string"
 
-- name: ICINGA2 MYSQL | Estableciendo la contraseña para el usuario de la DB para el paquete de 'icinga-ido-mysql'
+- name: ICINGA2 | Estableciendo la contraseña para el usuario de la base de datos de Icinga2 en el paquete de 'icinga-ido-mysql'
   debconf:
     name: "icinga2-ido-mysql"
     question: "icinga2-ido-mysql/mysql/app-pass"
     value: "{{ db_icinga2_password }}"
     vtype: "password"
 
-- name: PACKAGES | Instalando los paquetes de Icinga2
+- name: PACKAGES | Instalando los paquetes que requiere Icinga2
   apt:
     name:
       - icinga2
@@ -74,19 +74,19 @@
       - monitoring-plugins-basic
     state: latest
 
-- name: ICINGA2 DAEMON | Iniciando y habilitando el servico
+- name: ICINGA2 | Iniciando y habilitando el servicio
   systemd:
     name: icinga2
     state: started
     enabled: true
 
-- name: ICINGA2 VIM | Configurando el editor de texto vim
+- name: ICINGA2 | Configurando el editor de texto vim para Icinga2
   command: vim-addon-manager -w install icinga2
 
-- name: ICINGA2 API SETUP | Generando el usuario de la api para transportar los comandos a los nodos cliente
+- name: ICINGA2 | Generando el usuario de la api para transportar los comandos a los nodos cliente
   command: icinga2 api setup
 
-- name: ICINGA2 API FILE | Copiando las credenciales de la api
+- name: ICINGA2 | Copiando las credenciales de la api
   template:
     src: api_config.j2
     dest: /etc/icinga2/features-available/api.conf
@@ -94,7 +94,7 @@
     owner: root
     group: root
 
-- name: ICINGA2 MODULES | Habilitando los módulos de Icinga2
+- name: ICINGA2 | Habilitando los módulos de Icinga2
   icinga2_feature:
     name: "{{ item }}" 
     state: present
@@ -103,3 +103,9 @@
     - ido-mysql
     - api
   notify: icinga2 restart
+
+- name: ICINGA2 | Mostrando un mensaje final
+  debug:
+    msg: "Configuración de Icinga2 terminada con éxito."
+
+...

@@ -1,0 +1,162 @@
+---
+
+- name: PACKAGES | Instalando los paquetes que requiere Icingaweb2
+  apt:
+    name:
+      - apache2
+      - libapache2-mod-php
+      - php 
+      - php-gd
+      - php-mysql
+      - php-intl
+      - php-curl
+      - php-mbstring
+      - php-xml
+      - php-imagick
+      - icingaweb2
+      - icingacli
+    state: latest
+
+- name: PHP | Obteniendo versión de PHP
+  shell: php --version | head -1 | tr -s " " "." | cut -d "." -f2,3
+  register: php_version
+
+- name: PHP | Estableciendo la zona horaria y deshabilitando la visibilidad de la versión de PHP
+  replace:
+    path: "/etc/php/{{ php_version['stdout'] }}/apache2/php.ini"
+    regexp: "{{ item.option }}" 
+    replace: "{{ item.value }}" 
+    backup: yes
+  with_items:
+    - { option: '^;date\.timezone =', value: 'date.timezone = Europe/Madrid' }
+    - { option: 'expose_php = On', value: 'expose_php = Off' } 
+
+- name: APACHE2 | Deshabilitando la visibilidad de la versión en Apache
+  replace:
+    path: /etc/apache2/conf-enabled/security.conf
+    regexp: "{{ item.option }}" 
+    replace: "{{ item.value }}" 
+    backup: yes
+  with_items:
+    - { option: 'ServerSignature On', value: 'ServerSignature Off' }
+    - { option: 'ServerTokens OS', value: 'ServerTokens  Prod' }
+  notify: apache2 restart
+
+- name: APACHE2 | Eliminando el directorio por defecto
+  file:
+    path: /var/www/html/
+    state: absent
+
+- name: APACHE2 | Deshabilitando el virtualhost por defecto
+  shell:  "a2dissite 000-default.conf"
+  notify: apache2 restart
+
+- name: APACHE2 | Iniciando y habilitando el servicio
+  systemd:
+    name: apache2
+    state: started
+    enabled: true
+
+- name: MYSQL | Creando la base de datos de Icingaweb2
+  mysql_db:
+    login_user: root
+    login_password: "{{ db_root_password }}"
+    login_host: localhost
+    name: "{{ db_icingaweb2 }}"
+    state: present
+
+- name: MYSQL | Creando el usuario de la base de datos de Icingaweb2
+  mysql_user:
+    login_user: root
+    login_password: "{{ db_root_password }}"
+    login_host: localhost
+    name: "{{ db_icingaweb2_user }}"
+    password: "{{ db_icingaweb2_password }}"
+    priv: "{{ db_icingaweb2}}.*:ALL"
+
+- name: MYSQL | Importando las tablas para IcingaWeb2
+  mysql_db:
+    login_user: root
+    login_password: "{{ db_root_password }}"
+    name: "{{ db_icingaweb2 }}"
+    state: import
+    target: /usr/share/icingaweb2/etc/schema/mysql.schema.sql
+
+- name: MYSQL | Copiando un 'insert' para establecer la contraseña del usuario de la GUI de Icingaweb2
+  template:
+    src: admin_gui-sql.j2
+    dest: /tmp/admin_gui.sql
+    mode: 0640
+    owner: root
+    group: root
+
+- name: MYSQL | Ejecutando la sentencia sql en la base de datos de Icingaweb2
+  mysql_db:
+    login_user: root
+    login_password: "{{ db_root_password }}"
+    name: "{{ db_icingaweb2 }}"
+    state: import
+    target: /tmp/admin_gui.sql
+
+- name: ICINGAWEB2 | Copiando el virtualhost para Icingaweb2 
+  template:
+    src: icingaweb2.j2
+    dest: /etc/apache2/sites-available/icingaweb2.conf 
+    owner: root
+    group: root
+    mode: 0644
+
+- name: ICINGAWEB2 | Habilitando el virtualhost
+  shell:  "a2ensite icingaweb2.conf"
+  notify: apache2 restart
+
+- name: ICINGAWEB2 | Estableciendo el directorio de configuración de Icingaweb2
+  command: icingacli setup config directory
+
+- name: ICINGAWEB2 | Creando los directorios para los módulos
+  file:
+    path: "{{ item.dir }}"
+    state: directory
+    owner: www-data
+    group: icingaweb2
+    mode: 0750
+  with_items:
+    - { dir: '/etc/icingaweb2/modules/' }
+    - { dir: '/etc/icingaweb2/enabledModules/' }
+    - { dir: '/etc/icingaweb2/modules/monitoring/' }
+    - { dir: '/etc/icingaweb2/enabledModules/monitoring/' }
+
+- name: ICINGAWEB2 | Añadiendo los archivos de configuración de Icingaweb2
+  template:
+    src: "{{ item.file }}"
+    dest: "{{ item.dest }}"
+    mode: 0750
+    owner: www-data
+    group: icingaweb2
+  with_items:
+    - { file: 'config.j2', dest: '/etc/icingaweb2/config.ini'}
+    - { file: 'resources.j2', dest: '/etc/icingaweb2/resources.ini'}
+    - { file: 'roles.j2', dest: '/etc/icingaweb2/roles.ini'}
+    - { file: 'authentication.j2', dest: '/etc/icingaweb2/authentication.ini'}
+    - { file: 'module_config.j2', dest: '/etc/icingaweb2/modules/monitoring/config.ini'}
+    - { file: 'module_backends.j2', dest: '/etc/icingaweb2/modules/monitoring/backends.ini'}
+    - { file: 'module_commandtransports.j2', dest: '/etc/icingaweb2/modules/monitoring/commandtransports.ini'}
+    - { file: 'groups.j2', dest: '/etc/icingaweb2/groups.ini'}
+  notify: icinga2 restart
+
+- name: ICINGAWEB2 | Eliminando el módulo monitoring
+  file:
+    path: /etc/icingaweb2/enabledModules/monitoring
+    state: absent
+
+- name: ICINGAWEB2 | Habilitano el módulo monitoring
+  file:
+    src: /usr/share/icingaweb2/modules/monitoring
+    dest: /etc/icingaweb2/enabledModules/monitoring
+    state: link
+
+- name: ICINGAWEB2 | Mostrando el mensaje de acceso a la GUI de Icingaweb2
+  debug:
+    msg: "Configuración de IcingaWeb2 terminada, puedes acceder a través de las siguientes direcciones IP: {{ ansible_all_ipv4_addresses}} o usando el nombre del servidor: {{ ansible_fqdn }} ."
+
+...

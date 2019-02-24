@@ -1,0 +1,48 @@
+<VirtualHost *:80>
+  ServerName {{ ansible_domain }}
+  DocumentRoot "/usr/share/icingaweb2/public"
+  ErrorLog ${APACHE_LOG_DIR}/icingaweb2_error.log
+  CustomLog ${APACHE_LOG_DIR}/icingaweb2_access.log combined
+
+  ## Rewrite rules
+  RewriteEngine On
+
+  <Directory "/usr/share/icingaweb2/public">
+      Options SymLinksIfOwnerMatch
+      AllowOverride None
+
+      <IfModule mod_authz_core.c>
+          # Apache 2.4
+          <RequireAll>
+              Require all granted
+          </RequireAll>
+      </IfModule>
+
+      <IfModule !mod_authz_core.c>
+          # Apache 2.2
+          Order allow,deny
+          Allow from all
+      </IfModule>
+
+      SetEnv ICINGAWEB_CONFIGDIR "/etc/icingaweb2"
+
+      EnableSendfile Off
+
+      <IfModule mod_rewrite.c>
+          RewriteEngine on
+          # modified base
+          RewriteBase /
+          RewriteCond %{REQUEST_FILENAME} -s [OR]
+          RewriteCond %{REQUEST_FILENAME} -l [OR]
+          RewriteCond %{REQUEST_FILENAME} -d
+          RewriteRule ^.*$ - [NC,L]
+          RewriteRule ^.*$ index.php [NC,L]
+      </IfModule>
+
+      <IfModule !mod_rewrite.c>
+          DirectoryIndex error_norewrite.html
+          ErrorDocument 404 /error_norewrite.html
+		  ErrorDocument 500 /error_unavailable.html
+      </IfModule>
+  </Directory>
+</VirtualHost>
