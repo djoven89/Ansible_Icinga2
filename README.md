@@ -1,4 +1,4 @@
-# Implementando de un stack de monitorización basado en Icinga2
+# Implementando un stack de monitorización basado en Icinga2
 
 Mediante el uso de Ansible se procederá a implementar de forma automatizada un stack de monitorización con los siguientes softwares en un sistema operativo Ubuntu Server 18.04: 
 
