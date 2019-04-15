@@ -1,0 +1,18 @@
+---
+
+- name: influxdb restart
+  systemd:
+    name: influxdb
+    state: restarted
+
+- name: grafana restart
+  systemd:
+    name: grafana-server
+    state: restarted
+
+- name: icinga2 restart
+  systemd:
+    name: icinga2
+    state: restarted
+
+...

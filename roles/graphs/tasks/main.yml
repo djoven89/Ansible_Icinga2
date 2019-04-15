@@ -1,0 +1,198 @@
+---
+
+- name: InfluxDB | Importando la clave pública del repositorio
+  apt_key:
+    url: https://repos.influxdata.com/influxdb.key
+    state: present
+
+- name: InfluxDB | Añadiendo el repositorio
+  apt_repository:
+    repo: "deb https://repos.influxdata.com/{{ ansible_distribution | lower }} {{ ansible_distribution_release }} stable"
+    filename: influxdb_repo
+    state: present
+    update_cache: yes
+
+- name: InfluxDB | Instalando el paquete
+  apt:
+    name: 
+       - influxdb
+       - python3-influxdb
+    state: present
+
+- name: InfluxDB | Copiando la configuración del servicio
+  copy:
+    src: influxdb.conf
+    dest: /etc/influxdb/
+    owner: root
+    group: root
+    mode: 0644
+
+- name: InfluxDB | Iniciando y habilitando el demonio
+  systemd:
+    name: influxdb
+    state: started
+    enabled: yes
+
+- name: InfluxDB | Comprobando que el puerto está correctamente a la escucha
+  wait_for:
+    port: 8086
+    state: present
+    timeout: 30
+
+- name: InfluxDB | Creando el usuario administrador de InfluxDB
+  influxdb_user:
+    user_name: "{{ influxdb_admin }}"
+    user_password: "{{ influxdb_admin_password }}"
+    login_username: admin
+    login_password: admin
+    admin: yes
+    state: present
+
+- name: InfluxDB | Creando el usuario de la DB de monitorización
+  influxdb_user:
+    user_name: "{{ influxdb_user }}"
+    user_password: "{{ influxdb_password }}"
+    login_username: "{{ influxdb_admin }}"
+    login_password: "{{ influxdb_admin_password }}"
+    admin: no
+    state: present
+
+- name: InfluxDB | Creando la base de datos para la monitorización
+  influxdb_database:
+    username: "{{ influxdb_admin }}"
+    password: "{{ influxdb_admin_password }}"
+    database_name: "{{ influxdb_db }}"
+    state: present
+
+- name: InfluxDB | Estableciendo los permisos para el usuario de la DB de monitorización
+  uri: 
+    url: "http://localhost:8086/query"
+    method: POST
+    user: "{{ influxdb_admin }}"
+    password: "{{ influxdb_admin_password }}"
+    body: "q=GRANT ALL ON {{ influxdb_db }} to {{ influxdb_user }}"
+
+- name: Icinga2 | Configurando InfluxDB feature
+  replace:
+    path: /etc/icinga2/features-available/influxdb.conf
+    regexp: "{{ item.param }}"
+    replace: "{{ item.value }}"
+    backup: true
+  with_items:
+    - { param: "//", value: "" }
+    - { param: "icinga2", value: "{{ influxdb_db }}" }
+
+- name: Icinga2 | Configurando la autenticación para la feature de InfluxDB
+  lineinfile:
+    path: /etc/icinga2/features-available/influxdb.conf
+    regexp: "{{ item.param }}"
+    line: "{{ item.value }}"
+    insertafter: "database .*"
+  with_items:
+    - { param: "password = .*", value: "  password = \"{{ influxdb_password }}\"" }
+    - { param: "username = .*", value: "  username = \"{{ influxdb_user }}\"" }
+
+- name: Icinga2 | Habilitando InfluxDB feature
+  icinga2_feature:
+    name: influxdb
+    state: present
+  notify: icinga2 restart
+
+
+- name: Grafana | Importando la clave pública del repositorio
+  apt_key:
+    url: https://packages.grafana.com/gpg.key
+    state: present
+
+- name: Grafana | Añadiendo el repositorio
+  apt_repository:
+    repo: "deb https://packages.grafana.com/oss/deb stable main"
+    filename: grafana_repo
+    state: present
+    update_cache: yes
+
+- name: Grafana | Instalando el servicio
+  apt:
+    name: grafana
+    state: latest
+
+- name: Grafana | Estableciendo opciones de configuración del servicio
+  replace:
+    path: /etc/grafana/grafana.ini
+    regexp: "{{ item.key }}"
+    replace: "{{ item.value }}"
+    backup: yes
+  with_items:
+    - { key: ";app_mode:", value: "app_mode:" }
+    - { key: ";instance_name ", value: "instance_name " }
+    - { key: ";data =", value: "data =" }
+    - { key: ";temp_data_lifetime =", value: "temp_data_lifetime =" }
+    - { key: ";plugins =", value: "plugins =" }
+    - { key: ";logs = /var/log/grafana =", value: "logs /var/log/grafana" }
+    - { key: ";provisioning = .*", value: "provisioning = /etc/grafana/provisioning" }
+    - { key: ";protocol =", value: "protocol =" }
+    - { key: ";http_port =", value: "http:port =" }
+    - { key: ";route_logging =", value: "route_logging =" }
+    - { key: ";enable_gzip = false", value: "enable_gzip = true" }
+    - { key: ";reporting_enabled =.*", value: "reporting_enabled = false" }
+    - { key: ";check_for_updates =.*", value: "check_for_updates = true" }
+    - { key: ";admin_user =.*", value: "admin_user = {{ grafana_user }}" }
+    - { key: ";admin_password =.*", value: "admin_password = {{ grafana_password }}" }
+    - { key: ";mode =.*", value: "mode = file" }
+    - { key: ";level = info", value: "level = info" }
+    - { key: ";max_days = 7", value: "max_days = 30" }
+
+- name: Grafana | Copiando el datasource para Icinga2
+  template:
+    src: datasources-icinga2.j2
+    dest: /etc/grafana/provisioning/datasources/datasource-icinga2.yaml
+    owner: grafana
+    group: grafana
+    mode: 0644
+
+- name: Grafana | Copiando el dashboard para Icinga2
+  template:
+    src: dashboard-icinga2.j2
+    dest: /etc/grafana/provisioning/dashboards/dashboard-icinga2.yaml
+    owner: grafana
+    group: grafana
+    mode: 0644
+
+- name: Grafana | Eliminando los archivos de ejemplo para datasources y dashboards
+  file:
+    path: "{{ item }}"
+    state: absent
+  with_items:
+    - /etc/grafana/provisioning/datasources/sample.yaml
+    - /etc/grafana/provisioning/dashboards/sample.yaml 
+    - /etc/grafana/provisioning/notifiers/sample.yaml
+
+- name: Grafana | Creando el directorio de los dashboards
+  file:
+    path: /var/lib/grafana/dashboards
+    owner: grafana
+    group: grafana
+    mode: 0750
+    state: directory
+
+- name: Grafana | Copiando el dashboard para Icinga2
+  copy:
+    src: dashboard-icinga2.json
+    dest: /var/lib/grafana/dashboards/dashboard-icinga2.json
+    owner: grafana
+    group: grafana
+    mode: 0640
+
+- name: Grafana | Iniciando y habilitando el servicio
+  systemd:
+    name: grafana-server
+    state: started
+    enabled: yes
+
+- name: Grafana | Comprobando que el puerto está correctamente a la escucha
+  wait_for:
+    port: 3000
+    state: present
+    timeout: 30
+
+...

@@ -3,7 +3,7 @@ server_fqdn: 'icinga2.lab.lan'
 ansible_python_interpreter: '/usr/bin/python3'
 
 
-## Bases de datos
+## Bases de datos para Icinga2 e IcingaWeb2
 db_root_password: 'P@ssw0rd!'
 db_icinga2: 'icinga2'
 db_icinga2_user: 'icingadba'
@@ -20,5 +20,18 @@ icinga2_api_password: 'Icing@CmD!'
 
 ## IcingaWeb2
 icingaweb2_user: 'icingadmin'
-## Para generar el hash -> php -r 'echo password_hash("P@ssw0rd!", PASSWORD_DEFAULT);'
-icingaweb2_user_password: '$2y$10$9SDOGEnTHYpwD0Cn3kmLz.KNSUPhj9Cq78aQux6T.Mmx4iQ/idz7u'
+## Para generar el hash -> openssl passwd -1 P@ssw0rd!
+icingaweb2_user_password: '$1$RHOmr1ZT$P7OQh.Um/KYOFSnqwFgh//'
+
+
+## InfluxDB
+influxdb_admin: 'dbainflux'
+influxdb_admin_password: 'P@ssword!'
+influxdb_user: 'influxadmin'
+influxdb_password: 'P@ssw0rd!'
+influxdb_db: 'icinga2'
+
+
+## Grafana
+grafana_user: 'grafanadmin'
+grafana_password: 'P@ssw0rd!'
